@@ -22,7 +22,7 @@ void SendKeyPress(WORD vkKeyCode);
 void RunCommand(TCHAR* command);
 BOOL LoadSettings();
 BOOL GetAndSetSetting(char* settings, TCHAR* key, TCHAR* valueStr);
-void AlertErrorAndExit(char* errorMsg);
+void AlertErrorAndExit(char* format, ...);
 
 int APIENTRY WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPTSTR lpCmdLine, int nCmdShow)
 {
@@ -171,10 +171,7 @@ void RunCommand(TCHAR* command)
 		&pi )           // Pointer to PROCESS_INFORMATION structure
 		)
 	{
-		char format[] = "CreateProcess failed with error: %d, for command: %s";
-		char message[strlen(format) + 3 + strlen(command)];
-		sprintf(message, format, GetLastError(), command);
-		AlertErrorAndExit(message);
+		AlertErrorAndExit("CreateProcess failed with error: %d, for command: %s", GetLastError(), command);
 	}
 }
 
@@ -233,10 +230,7 @@ BOOL GetAndSetSetting(char* settings, TCHAR* key, TCHAR* valueStr)
 	char* value = strstr(settings, key);
 	if(!value)
 	{
-		char format[] = "Could not find config key: %s";
-		char message[strlen(format) + strlen(key)];
-		sprintf(message, format, key);
-		AlertErrorAndExit(message);
+		AlertErrorAndExit("Could not find config key: %s", key);
 	}
 	value += strlen(key);
 	while(*value == ' ' || *value == '=')
@@ -251,20 +245,21 @@ BOOL GetAndSetSetting(char* settings, TCHAR* key, TCHAR* valueStr)
 
 	if(strlen(valueStr) ==0)
 	{
-		char format[] = "No value found for config key: %s";
-		char message[strlen(format) + strlen(key)];
-		sprintf(message, format, key);
-		AlertErrorAndExit(message);
+		AlertErrorAndExit("No value found for config key: %s", key);
 	}
 	return 1;
 }
 
-void AlertErrorAndExit(char* errorMsg)
+void AlertErrorAndExit(char* format, ...)
 {
-	char format[] = "%s\nConfig path: %s";
-	int size = strlen(errorMsg) + strlen(format) + MAX_PATH;
-	char message[size];
-	sprintf(message, format, errorMsg, CONFIG_FILE_PATH);
+	char message[MAX_COMMAND*2];
+	va_list args;
+    va_start(args, format);
+    vsprintf(message, format, args);
+    va_end(args);
+
+	// Append config file at end
+	sprintf(message, "%s\nConfig path: %s", message, CONFIG_FILE_PATH);
 	MessageBox(0, message, "ATKMediaInterceptor", MB_ICONERROR);
 	exit(0);
 }
