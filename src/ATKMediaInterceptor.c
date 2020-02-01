@@ -178,10 +178,6 @@ void RunCommand(TCHAR* command)
 BOOL LoadSettings()
 {
 	TCHAR modulePath[MAX_PATH];
-	ZeroMemory(modulePath, MAX_PATH);
-	ZeroMemory(CONFIG_FILE_PATH, MAX_PATH);
-	ZeroMemory(genericCommand, MAX_COMMAND);
-
 	GetModuleFileName(NULL /*current process*/, modulePath, MAX_PATH);
 
 	char * c = strrchr(modulePath, '\\') + 1;
@@ -241,7 +237,9 @@ BOOL GetAndSetSetting(char* settings, TCHAR* key, TCHAR* valueStr)
 	{
 		valueStr[bytesWritten++] = *(value++);
 	}
-//	printf("setting: %s \nvalue: %s\n", key, valueStr);
+	valueStr[bytesWritten] = '\0';
+
+//	printf("setting: %s value: %s\n", key, valueStr);
 
 	if(strlen(valueStr) ==0)
 	{
