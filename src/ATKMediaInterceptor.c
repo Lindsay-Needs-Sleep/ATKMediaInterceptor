@@ -21,7 +21,7 @@ ATOM MRegisterClass(HINSTANCE hInstance);
 BOOL InitInstance(HINSTANCE, int);
 LRESULT CALLBACK WndProc(HWND, UINT, WPARAM, LPARAM);
 void SendKeyPress(WORD vkKeyCode);
-void RunCommand(TCHAR* command);
+BOOL RunCommand(TCHAR* command, TCHAR* commandKey);
 BOOL LoadSettings();
 BOOL GetAndSetSetting(char* settings, TCHAR* key, TCHAR* valueStr);
 void AlertError(char* format, ...);
@@ -111,10 +111,10 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
 		switch(wmEvent)
 		{
 		case ATKMEDIA_CALC:
-			RunCommand(calculatorCommand);
+			RunCommand(calculatorCommand, CONFIG_KEY_CalculatorCommand);
 			return 0;
 		case ATKMEDIA_GENERIC:
-			RunCommand(genericCommand);
+			RunCommand(genericCommand, CONFIG_KEY_GenericCommand);
 			return 0;
 		case ATKMEDIA_PLAY:
 			SendKeyPress(VK_MEDIA_PLAY_PAUSE);
@@ -154,8 +154,14 @@ void SendKeyPress(WORD vkKeyCode)
 	SendInput(1, &ip, sizeof(INPUT));
 }
 
-void RunCommand(TCHAR* command)
+BOOL RunCommand(TCHAR* command, TCHAR* commandKey)
 {
+	if(strlen(command) == 0)
+	{
+		AlertError("No command found for key \"%s\".", commandKey);
+		return 0;
+	}
+
 	STARTUPINFO si;
 	PROCESS_INFORMATION pi;
 
@@ -177,7 +183,7 @@ void RunCommand(TCHAR* command)
 		&pi )           // Pointer to PROCESS_INFORMATION structure
 		)
 	{
-		AlertErrorAndExit("CreateProcess failed with error: %d, for command: %s", GetLastError(), command);
+		AlertError("CreateProcess for command key: \"%s\", failed with error: %d, for command: \"%s\"", commandKey, GetLastError(), command);
 		return 0;
 	}
 	return 1;
@@ -185,6 +191,11 @@ void RunCommand(TCHAR* command)
 
 BOOL LoadSettings()
 {
+	// Ensure settings values are empty strings to start (incase they don't get set)
+	CONFIG_FILE_PATH[0] = '\0';
+	genericCommand[0] = '\0';
+	calculatorCommand[0] = '\0';
+
 	TCHAR modulePath[MAX_PATH];
 	GetModuleFileName(NULL /*current process*/, modulePath, MAX_PATH);
 
