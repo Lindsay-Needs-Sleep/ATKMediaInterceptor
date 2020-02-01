@@ -1,5 +1,4 @@
 #include <windows.h>
-#include <tlhelp32.h>
 #include <stdio.h>
 
 /**
@@ -19,10 +18,7 @@ TCHAR mediaApplicationPath[MAX_PATH];
 ATOM MRegisterClass(HINSTANCE hInstance);
 BOOL InitInstance(HINSTANCE, int);
 LRESULT CALLBACK WndProc(HWND, UINT, WPARAM, LPARAM);
-int FindApplicationPid(TCHAR* appPath);
-HWND FindApplicationWindow(TCHAR* appPath);
-HWND EnsureApplicationIsRunning(TCHAR* appPath);
-void OpenApp(TCHAR* path);
+void SendKeyPress(WORD vkKeyCode);
 BOOL LoadSettings();
 BOOL GetAndSetSetting(char* settings, TCHAR* key, TCHAR* valueStr);
 void AlertErrorAndExit(char* errorMsg);
@@ -111,8 +107,6 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
 		wmId    = LOWORD(wParam);
 		wmEvent = HIWORD(wParam);
 
-		HWND hAppWindow;
-
 		switch (wmId)
 		{
 		case WM_CLOSE:
@@ -121,21 +115,19 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
 
 		case ATKMEDIA_MESSAGE:
 
-			hAppWindow = EnsureApplicationIsRunning(mediaApplicationPath);
-
 			switch(wmEvent)
 			{
 			case ATKMEDIA_PLAY:
-				PostMessage(hAppWindow, WM_APPCOMMAND, 0, MAKELPARAM(0, APPCOMMAND_MEDIA_PLAY_PAUSE));
+				SendKeyPress(VK_MEDIA_PLAY_PAUSE);
 				break;
 			case ATKMEDIA_STOP:
-				PostMessage(hAppWindow, WM_APPCOMMAND, 0, MAKELPARAM(0, APPCOMMAND_MEDIA_STOP));
+				SendKeyPress(VK_MEDIA_STOP);
 				break;
 			case ATKMEDIA_NEXT:
-				PostMessage(hAppWindow, WM_APPCOMMAND, 0, MAKELPARAM(0, APPCOMMAND_MEDIA_NEXTTRACK));
+				SendKeyPress(VK_MEDIA_NEXT_TRACK);
 				break;
 			case ATKMEDIA_PREV:
-				PostMessage(hAppWindow, WM_APPCOMMAND, 0, MAKELPARAM(0, APPCOMMAND_MEDIA_PREVIOUSTRACK));
+				SendKeyPress(VK_MEDIA_PREV_TRACK);
 				break;
 			}
 
@@ -153,97 +145,24 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
 	return 0;
 }
 
-// Based on https://www.12ghast.com/code/c-process-name-to-pid/
-int FindApplicationPid(TCHAR* appPath)
+// Based on https://batchloaf.wordpress.com/2012/04/17/simulating-a-keystroke-in-win32-c-or-c-using-sendinput/
+void SendKeyPress(WORD vkKeyCode)
 {
-	// Create a snapshot of currently running processes
-	HANDLE snap = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
-	// Some error handling in case we failed to get a snapshot of running processes
-	if(snap == INVALID_HANDLE_VALUE)
-	{
-		// Clean the snapshot object to prevent resource leakage
-		CloseHandle(snap);
-		AlertErrorAndExit(GetLastError());
-	}
+	// Create a keyboard event
+	INPUT ip;
+	ip.type = INPUT_KEYBOARD;
+	ip.ki.time = 0;
+	ip.ki.wScan = 0;
+	ip.ki.dwExtraInfo = 0;
+	ip.ki.wVk = vkKeyCode;
 
-	// Declare a PROCESSENTRY32 variable
-	PROCESSENTRY32 pe32;
-	// Set the size of the structure before using it.
-	pe32.dwSize = sizeof(PROCESSENTRY32);
+	// Send key down
+	ip.ki.dwFlags = 0;
+	SendInput(1, &ip, sizeof(INPUT));
 
-	// Retrieve information about the first process and exit if unsuccessful
-	if(!Process32First(snap, &pe32))
-	{
-		// Clean the snapshot object to prevent resource leakage
-		CloseHandle(snap);
-		AlertErrorAndExit(GetLastError());
-	}
-
-	int pid = 0;
-	char* target = strrchr(appPath, '\\') + 1;
-	// Cycle through Process List
-	do {
-		// Comparing two strings containing process names for 'equality'
-		if(strcmp(pe32.szExeFile, target) == 0) {
-			pid = pe32.th32ProcessID;
-			break;
-		}
-	} while (Process32Next(snap, &pe32));
-	// Clean the snapshot object to prevent resource leakage
-	CloseHandle(snap);
-	return pid;
-}
-
-HWND FindApplicationWindow(TCHAR* appPath)
-{
-	int pid = FindApplicationPid(appPath);
-	if(!pid)
-	{
-		return 0;
-	}
-	HWND appWindow = NULL;
-	BOOL CALLBACK EnumWindowsProcMy(HWND hwnd, LPARAM wantedPid)
-	{
-		DWORD pid;
-		GetWindowThreadProcessId(hwnd, &pid);
-		if(pid == wantedPid)
-		{
-			appWindow = hwnd;
-			return FALSE;
-		}
-		return TRUE;
-	}
-	EnumWindows(EnumWindowsProcMy, pid);
-	return appWindow;
-}
-
-HWND EnsureApplicationIsRunning(TCHAR* appPath)
-{
-	HWND win = FindApplicationWindow(appPath);
-	// If can't find Application PID
-	if(!win)
-	{
-		// Try to open the Application
-		OpenApp(appPath);
-		// Give the window a second to open
-		sleep(1);
-		// If we still can't find the Application PID
-		win = FindApplicationWindow(appPath);
-		if(!win)
-		{
-			// The appPath is probably wrong, so report it
-			char format[] = "Can't find or start the application at path: %s. Ensure the config file is correct.";
-			char message[strlen(format) + strlen(appPath)];
-			sprintf(message, format, appPath);
-			AlertErrorAndExit(message);
-		}
-	}
-	return win;
-}
-
-void OpenApp(TCHAR* path)
-{
-	ShellExecute(NULL, NULL, path, NULL, NULL, SW_SHOW);
+	// Send key again but with keyup event
+	ip.ki.dwFlags = KEYEVENTF_KEYUP;
+	SendInput(1, &ip, sizeof(INPUT));
 }
 
 BOOL LoadSettings()
