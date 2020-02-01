@@ -225,7 +225,8 @@ HWND EnsureApplicationIsRunning(TCHAR* appPath)
 	{
 		// Try to open the Application
 		OpenApp(appPath);
-
+		// Give the window a second to open
+		sleep(1);
 		// If we still can't find the Application PID
 		win = FindApplicationWindow(appPath);
 		if(!win)
