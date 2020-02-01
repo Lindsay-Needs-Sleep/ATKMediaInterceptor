@@ -13,7 +13,9 @@ TCHAR szWindowClass[] = "ATKMEDIA";
 TCHAR CONFIG_FILE_NAME[] = "ATKMediaInterceptor.conf";
 TCHAR CONFIG_FILE_PATH[MAX_PATH];
 TCHAR CONFIG_KEY_GenericCommand[] = "generic_button_command";
+TCHAR CONFIG_KEY_CalculatorCommand[] = "calculator_button_command";
 TCHAR genericCommand[MAX_COMMAND];
+TCHAR calculatorCommand[MAX_COMMAND];
 
 ATOM MRegisterClass(HINSTANCE hInstance);
 BOOL InitInstance(HINSTANCE, int);
@@ -97,6 +99,7 @@ BOOL InitInstance(HINSTANCE hInstance, int nCmdShow)
 #define ATKMEDIA_STOP                     0x0003
 #define ATKMEDIA_PREV                     0x0005
 #define ATKMEDIA_NEXT                     0x0004
+#define ATKMEDIA_CALC                     0x002B
 
 LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
 {
@@ -107,6 +110,9 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
 	{
 		switch(wmEvent)
 		{
+		case ATKMEDIA_CALC:
+			RunCommand(calculatorCommand);
+			return 0;
 		case ATKMEDIA_GENERIC:
 			RunCommand(genericCommand);
 			return 0;
@@ -213,6 +219,7 @@ BOOL LoadSettings()
 	}
 	// Retrieve each setting
 	passed = passed && GetAndSetSetting(buffer, CONFIG_KEY_GenericCommand, genericCommand);
+	passed = passed && GetAndSetSetting(buffer, CONFIG_KEY_CalculatorCommand, calculatorCommand);
 
 	// Free memory
 	free(buffer);
