@@ -1,10 +1,6 @@
 #include <windows.h>
 #include <stdio.h>
 
-/**
- * 2011, zaak404@gmail.com
- */
-
 #define MAX_COMMAND 2500
 
 HINSTANCE hInst;
