@@ -24,7 +24,7 @@ void SendKeyPress(WORD vkKeyCode);
 void RunCommand(TCHAR* command);
 BOOL LoadSettings();
 BOOL GetAndSetSetting(char* settings, TCHAR* key, TCHAR* valueStr);
-void AlertErrorAndExit(char* format, ...);
+void AlertError(char* format, ...);
 
 int APIENTRY WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPTSTR lpCmdLine, int nCmdShow)
 {
@@ -178,7 +178,9 @@ void RunCommand(TCHAR* command)
 		)
 	{
 		AlertErrorAndExit("CreateProcess failed with error: %d, for command: %s", GetLastError(), command);
+		return 0;
 	}
+	return 1;
 }
 
 BOOL LoadSettings()
@@ -198,14 +200,16 @@ BOOL LoadSettings()
 
 	if(!f)
 	{
-		AlertErrorAndExit("Could not find config file.");
+		AlertError("Could not find config file.");
+		return 0;
 	}
 
 	fseek(f , 0 , SEEK_END);
 	size_t fSize = ftell(f);
 	if(fSize == 0)
 	{
-		AlertErrorAndExit("Empty config file.");
+		AlertError("Empty config file.");
+		return 0;
 	}
 	rewind(f);
 
@@ -215,7 +219,8 @@ BOOL LoadSettings()
 	int result = fread(buffer, sizeof(char), fSize, f);
 	if(!result)
 	{
-		AlertErrorAndExit("Could not read config file.");
+		AlertError("Could not read config file.");
+		return 0;
 	}
 	// Retrieve each setting
 	passed = passed && GetAndSetSetting(buffer, CONFIG_KEY_GenericCommand, genericCommand);
@@ -233,7 +238,8 @@ BOOL GetAndSetSetting(char* settings, TCHAR* key, TCHAR* valueStr)
 	char* value = strstr(settings, key);
 	if(!value)
 	{
-		AlertErrorAndExit("Could not find config key: %s", key);
+		AlertError("Could not find config key: %s", key);
+		return 0;
 	}
 	value += strlen(key);
 	while(*value == ' ' || *value == '=')
@@ -248,14 +254,14 @@ BOOL GetAndSetSetting(char* settings, TCHAR* key, TCHAR* valueStr)
 
 //	printf("setting: %s value: %s\n", key, valueStr);
 
-	if(strlen(valueStr) ==0)
+	if(strlen(valueStr) == 0)
 	{
-		AlertErrorAndExit("No value found for config key: %s", key);
+		AlertError("No value found for config key: %s", key);
 	}
-	return 1;
+	return strlen(valueStr) != 0;
 }
 
-void AlertErrorAndExit(char* format, ...)
+void AlertError(char* format, ...)
 {
 	char message[MAX_COMMAND*2];
 	va_list args;
@@ -266,5 +272,4 @@ void AlertErrorAndExit(char* format, ...)
 	// Append config file at end
 	sprintf(message, "%s\nConfig path: %s", message, CONFIG_FILE_PATH);
 	MessageBox(0, message, "ATKMediaInterceptor", MB_ICONERROR);
-	exit(0);
 }
