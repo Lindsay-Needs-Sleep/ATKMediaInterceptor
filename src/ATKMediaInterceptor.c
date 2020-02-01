@@ -5,20 +5,21 @@
  * 2011, zaak404@gmail.com
  */
 
-#define MAX_CLASS_NAME 128
+#define MAX_COMMAND 2500
 
 HINSTANCE hInst;
 TCHAR szTitle[] = "ATKMEDIA";
 TCHAR szWindowClass[] = "ATKMEDIA";
 TCHAR CONFIG_FILE_NAME[] = "ATKMediaInterceptor.conf";
 TCHAR CONFIG_FILE_PATH[MAX_PATH];
-TCHAR CONFIG_KEY_MediaApplicationPath[] = "media_application_path";
-TCHAR mediaApplicationPath[MAX_PATH];
+TCHAR CONFIG_KEY_GenericCommand[] = "generic_button_command";
+TCHAR genericCommand[MAX_COMMAND];
 
 ATOM MRegisterClass(HINSTANCE hInstance);
 BOOL InitInstance(HINSTANCE, int);
 LRESULT CALLBACK WndProc(HWND, UINT, WPARAM, LPARAM);
 void SendKeyPress(WORD vkKeyCode);
+void RunCommand(TCHAR* command);
 BOOL LoadSettings();
 BOOL GetAndSetSetting(char* settings, TCHAR* key, TCHAR* valueStr);
 void AlertErrorAndExit(char* errorMsg);
@@ -90,8 +91,8 @@ BOOL InitInstance(HINSTANCE hInstance, int nCmdShow)
    return TRUE;
 }
 
-#define WM_APPCOMMAND                     0x0319
 #define ATKMEDIA_MESSAGE				  0x0917
+#define ATKMEDIA_GENERIC                  0x0001
 #define ATKMEDIA_PLAY                     0x0002
 #define ATKMEDIA_STOP                     0x0003
 #define ATKMEDIA_PREV                     0x0005
@@ -99,50 +100,32 @@ BOOL InitInstance(HINSTANCE hInstance, int nCmdShow)
 
 LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
 {
-	int wmId, wmEvent;
+	int wmId    = LOWORD(wParam);
+	int wmEvent = HIWORD(wParam);
 
-	switch (message)
+	if(message == WM_COMMAND && wmId == ATKMEDIA_MESSAGE)
 	{
-	case WM_COMMAND:
-		wmId    = LOWORD(wParam);
-		wmEvent = HIWORD(wParam);
-
-		switch (wmId)
+		switch(wmEvent)
 		{
-		case WM_CLOSE:
-			DestroyWindow(hWnd);
-			break;
-
-		case ATKMEDIA_MESSAGE:
-
-			switch(wmEvent)
-			{
-			case ATKMEDIA_PLAY:
-				SendKeyPress(VK_MEDIA_PLAY_PAUSE);
-				break;
-			case ATKMEDIA_STOP:
-				SendKeyPress(VK_MEDIA_STOP);
-				break;
-			case ATKMEDIA_NEXT:
-				SendKeyPress(VK_MEDIA_NEXT_TRACK);
-				break;
-			case ATKMEDIA_PREV:
-				SendKeyPress(VK_MEDIA_PREV_TRACK);
-				break;
-			}
-
-		default:
-			return DefWindowProc(hWnd, message, wParam, lParam);
+		case ATKMEDIA_GENERIC:
+			RunCommand(genericCommand);
+			return 0;
+		case ATKMEDIA_PLAY:
+			SendKeyPress(VK_MEDIA_PLAY_PAUSE);
+			return 0;
+		case ATKMEDIA_STOP:
+			SendKeyPress(VK_MEDIA_STOP);
+			return 0;
+		case ATKMEDIA_NEXT:
+			SendKeyPress(VK_MEDIA_NEXT_TRACK);
+			return 0;
+		case ATKMEDIA_PREV:
+			SendKeyPress(VK_MEDIA_PREV_TRACK);
+			return 0;
 		}
-		break;
-
-	case WM_DESTROY:
-		PostQuitMessage(0);
-		break;
-	default:
-		return DefWindowProc(hWnd, message, wParam, lParam);
 	}
-	return 0;
+	// Let the event go so it can be handled by the default
+	return DefWindowProc(hWnd, message, wParam, lParam);
 }
 
 // Based on https://batchloaf.wordpress.com/2012/04/17/simulating-a-keystroke-in-win32-c-or-c-using-sendinput/
@@ -165,12 +148,42 @@ void SendKeyPress(WORD vkKeyCode)
 	SendInput(1, &ip, sizeof(INPUT));
 }
 
+void RunCommand(TCHAR* command)
+{
+	STARTUPINFO si;
+	PROCESS_INFORMATION pi;
+
+	ZeroMemory( &si, sizeof(si) );
+	si.cb = sizeof(si);
+	ZeroMemory( &pi, sizeof(pi) );
+
+	// Start the child process.
+	if(!CreateProcess(
+		NULL,           // Program to run
+		command,        // Command to run
+		NULL,           // Process handle not inheritable
+		NULL,           // Thread handle not inheritable
+		FALSE,          // Set handle inheritance to FALSE
+		0,              // No creation flags
+		NULL,           // Use parent's environment block
+		NULL,           // Use parent's starting directory
+		&si,            // Pointer to STARTUPINFO structure
+		&pi )           // Pointer to PROCESS_INFORMATION structure
+		)
+	{
+		char format[] = "CreateProcess failed with error: %d, for command: %s";
+		char message[strlen(format) + 3 + strlen(command)];
+		sprintf(message, format, GetLastError(), command);
+		AlertErrorAndExit(message);
+	}
+}
+
 BOOL LoadSettings()
 {
 	TCHAR modulePath[MAX_PATH];
 	ZeroMemory(modulePath, MAX_PATH);
 	ZeroMemory(CONFIG_FILE_PATH, MAX_PATH);
-	ZeroMemory(mediaApplicationPath, MAX_PATH);
+	ZeroMemory(genericCommand, MAX_COMMAND);
 
 	GetModuleFileName(NULL /*current process*/, modulePath, MAX_PATH);
 
@@ -206,7 +219,7 @@ BOOL LoadSettings()
 		AlertErrorAndExit("Could not read config file.");
 	}
 	// Retrieve each setting
-	passed = passed && GetAndSetSetting(buffer, CONFIG_KEY_MediaApplicationPath, mediaApplicationPath);
+	passed = passed && GetAndSetSetting(buffer, CONFIG_KEY_GenericCommand, genericCommand);
 
 	// Free memory
 	free(buffer);
@@ -230,7 +243,7 @@ BOOL GetAndSetSetting(char* settings, TCHAR* key, TCHAR* valueStr)
 		++value;
 
 	int bytesWritten = 0;
-	while(*value != '\n' && *value != '\r' && *value != '\0' && bytesWritten < MAX_CLASS_NAME-1)
+	while(*value != '\n' && *value != '\r' && *value != '\0' && bytesWritten < MAX_COMMAND - 1)
 	{
 		valueStr[bytesWritten++] = *(value++);
 	}
