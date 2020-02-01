@@ -1,4 +1,5 @@
 #include <windows.h>
+#include <tlhelp32.h>
 #include <stdio.h>
 
 /**
@@ -10,16 +11,21 @@
 HINSTANCE hInst;
 TCHAR szTitle[] = "ATKMEDIA";
 TCHAR szWindowClass[] = "ATKMEDIA";
-TCHAR szSettingsFileName[] = "icpt.conf";
-TCHAR szSettingsPathKey[] = "application_path";
-TCHAR szSettingsClassKey[] = "window_class";
-TCHAR szAppPath[MAX_PATH];
-TCHAR szAppWindowClass[MAX_CLASS_NAME];
+TCHAR CONFIG_FILE_NAME[] = "ATKMediaInterceptor.conf";
+TCHAR CONFIG_FILE_PATH[MAX_PATH];
+TCHAR CONFIG_KEY_MediaApplicationPath[] = "media_application_path";
+TCHAR mediaApplicationPath[MAX_PATH];
 
 ATOM MRegisterClass(HINSTANCE hInstance);
 BOOL InitInstance(HINSTANCE, int);
 LRESULT CALLBACK WndProc(HWND, UINT, WPARAM, LPARAM);
+int FindApplicationPid(TCHAR* appPath);
+HWND FindApplicationWindow(TCHAR* appPath);
+HWND EnsureApplicationIsRunning(TCHAR* appPath);
+void OpenApp(TCHAR* path);
 BOOL LoadSettings();
+BOOL GetAndSetSetting(char* settings, TCHAR* key, TCHAR* valueStr);
+void AlertErrorAndExit(char* errorMsg);
 
 int APIENTRY WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPTSTR lpCmdLine, int nCmdShow)
 {
@@ -30,17 +36,7 @@ int APIENTRY WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPTSTR lpCmdL
 //    LPTSTR    lpCmdLine = 0;
 //    int       nCmdShow = SW_SHOWNORMAL;
 
-	ZeroMemory(szAppPath, MAX_PATH);
-	ZeroMemory(szAppWindowClass, MAX_CLASS_NAME);
-
-	if(!LoadSettings())
-	{
-		MessageBox(0, "Can't load settings file\n", "ATKMEDIA by zaak404", MB_ICONERROR);
-		return FALSE;
-	}
-
-	//printf("path: %s\n", szAppPath);
-	//printf("class: %s\n", szAppWindowClass);
+	LoadSettings();
 
 	MSG msg;
 
@@ -95,18 +91,10 @@ BOOL InitInstance(HINSTANCE hInstance, int nCmdShow)
       return FALSE;
    }
 
-   //ShowWindow(hWnd, nCmdShow);
-   //UpdateWindow(hWnd);
-
    return TRUE;
 }
 
 #define WM_APPCOMMAND                     0x0319
-#define APPCOMMAND_MEDIA_NEXTTRACK        11
-#define APPCOMMAND_MEDIA_PREVIOUSTRACK    12
-#define APPCOMMAND_MEDIA_STOP             13
-#define APPCOMMAND_MEDIA_PLAY_PAUSE       14
-
 #define ATKMEDIA_MESSAGE				  0x0917
 #define ATKMEDIA_PLAY                     0x0002
 #define ATKMEDIA_STOP                     0x0003
@@ -133,12 +121,7 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
 
 		case ATKMEDIA_MESSAGE:
 
-			hAppWindow = FindWindow(szAppWindowClass, NULL);
-			if(!hAppWindow)
-			{
-				ShellExecute(NULL, NULL, szAppPath, NULL, NULL, SW_SHOWNORMAL);
-				break;
-			}
+			hAppWindow = EnsureApplicationIsRunning(mediaApplicationPath);
 
 			switch(wmEvent)
 			{
@@ -160,6 +143,7 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
 			return DefWindowProc(hWnd, message, wParam, lParam);
 		}
 		break;
+
 	case WM_DESTROY:
 		PostQuitMessage(0);
 		break;
@@ -169,70 +153,185 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
 	return 0;
 }
 
+// Based on https://www.12ghast.com/code/c-process-name-to-pid/
+int FindApplicationPid(TCHAR* appPath)
+{
+	// Create a snapshot of currently running processes
+	HANDLE snap = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
+	// Some error handling in case we failed to get a snapshot of running processes
+	if(snap == INVALID_HANDLE_VALUE)
+	{
+		// Clean the snapshot object to prevent resource leakage
+		CloseHandle(snap);
+		AlertErrorAndExit(GetLastError());
+	}
+
+	// Declare a PROCESSENTRY32 variable
+	PROCESSENTRY32 pe32;
+	// Set the size of the structure before using it.
+	pe32.dwSize = sizeof(PROCESSENTRY32);
+
+	// Retrieve information about the first process and exit if unsuccessful
+	if(!Process32First(snap, &pe32))
+	{
+		// Clean the snapshot object to prevent resource leakage
+		CloseHandle(snap);
+		AlertErrorAndExit(GetLastError());
+	}
+
+	int pid = 0;
+	char* target = strrchr(appPath, '\\') + 1;
+	// Cycle through Process List
+	do {
+		// Comparing two strings containing process names for 'equality'
+		if(strcmp(pe32.szExeFile, target) == 0) {
+			pid = pe32.th32ProcessID;
+			break;
+		}
+	} while (Process32Next(snap, &pe32));
+	// Clean the snapshot object to prevent resource leakage
+	CloseHandle(snap);
+	return pid;
+}
+
+HWND FindApplicationWindow(TCHAR* appPath)
+{
+	int pid = FindApplicationPid(appPath);
+	if(!pid)
+	{
+		return 0;
+	}
+	HWND appWindow = NULL;
+	BOOL CALLBACK EnumWindowsProcMy(HWND hwnd, LPARAM wantedPid)
+	{
+		DWORD pid;
+		GetWindowThreadProcessId(hwnd, &pid);
+		if(pid == wantedPid)
+		{
+			appWindow = hwnd;
+			return FALSE;
+		}
+		return TRUE;
+	}
+	EnumWindows(EnumWindowsProcMy, pid);
+	return appWindow;
+}
+
+HWND EnsureApplicationIsRunning(TCHAR* appPath)
+{
+	HWND win = FindApplicationWindow(appPath);
+	// If can't find Application PID
+	if(!win)
+	{
+		// Try to open the Application
+		OpenApp(appPath);
+
+		// If we still can't find the Application PID
+		win = FindApplicationWindow(appPath);
+		if(!win)
+		{
+			// The appPath is probably wrong, so report it
+			char format[] = "Can't find or start the application at path: %s. Ensure the config file is correct.";
+			char message[strlen(format) + strlen(appPath)];
+			sprintf(message, format, appPath);
+			AlertErrorAndExit(message);
+		}
+	}
+	return win;
+}
+
+void OpenApp(TCHAR* path)
+{
+	ShellExecute(NULL, NULL, path, NULL, NULL, SW_SHOW);
+}
+
 BOOL LoadSettings()
 {
 	TCHAR modulePath[MAX_PATH];
-	TCHAR confFilePath[MAX_PATH];
 	ZeroMemory(modulePath, MAX_PATH);
-	ZeroMemory(confFilePath, MAX_PATH);
-	
+	ZeroMemory(CONFIG_FILE_PATH, MAX_PATH);
+	ZeroMemory(mediaApplicationPath, MAX_PATH);
+
 	GetModuleFileName(NULL /*current process*/, modulePath, MAX_PATH);
 
 	char * c = strrchr(modulePath, '\\') + 1;
 	*c= '\0';
 
-	strcat(confFilePath, modulePath);
-	strcat(confFilePath, szSettingsFileName);
+	strcat(CONFIG_FILE_PATH, modulePath);
+	strcat(CONFIG_FILE_PATH, CONFIG_FILE_NAME);
 
-	//MessageBox(0, confFilePath, "confFilePath", 0);
+//	printf("settings path %s \n" , CONFIG_FILE_PATH);
 
-	FILE *f = fopen(confFilePath, "r");
-	
+	FILE *f = fopen(CONFIG_FILE_PATH, "r");
+
 	if(!f)
 	{
-		//puts("Can't see settings.ini");
-		return 0;
+		AlertErrorAndExit("Could not find config file.");
 	}
 
 	fseek(f , 0 , SEEK_END);
 	size_t fSize = ftell(f);
+	if(fSize == 0)
+	{
+		AlertErrorAndExit("Empty config file.");
+	}
 	rewind(f);
 
+	int passed = 1;
 	char *buffer = (char*)malloc(fSize);
 	ZeroMemory(buffer, fSize);
-	if(buffer)
+	int result = fread(buffer, sizeof(char), fSize, f);
+	if(!result)
 	{
-		int result = fread(buffer, sizeof(char), fSize, f);
-
-		if(result)
-		{
-			// Class name
-			char* className = strstr(buffer, szSettingsClassKey) + strlen(szSettingsClassKey);
-			while(*className == ' ' || *className == '=')
-				++className;
-
-			int bytesWritten = 0;
-			while(*className != '\n' && *className != '\r' && *className != '\0' && bytesWritten < MAX_CLASS_NAME-1)
-			{
-				szAppWindowClass[bytesWritten++] = *(className++);
-			}
-
-			// Path
-			char* path = strstr(buffer, szSettingsPathKey) + strlen(szSettingsPathKey);
-			while(*path == ' ' || *path == '=')
-				++path;
-
-			bytesWritten = 0;
-			while(*path != '\n' && *path != '\r' && *path != '\0' && bytesWritten < MAX_PATH-1)
-			{
-				szAppPath[bytesWritten++] = *(path++);
-			}
-			
-		}
-		free(buffer);
+		AlertErrorAndExit("Could not read config file.");
 	}
+	// Retrieve each setting
+	passed = passed && GetAndSetSetting(buffer, CONFIG_KEY_MediaApplicationPath, mediaApplicationPath);
 
+	// Free memory
+	free(buffer);
 	fclose(f);
 
-	return strlen(szAppWindowClass) != 0;
+	return passed;
+}
+
+BOOL GetAndSetSetting(char* settings, TCHAR* key, TCHAR* valueStr)
+{
+	char* value = strstr(settings, key);
+	if(!value)
+	{
+		char format[] = "Could not find config key: %s";
+		char message[strlen(format) + strlen(key)];
+		sprintf(message, format, key);
+		AlertErrorAndExit(message);
+	}
+	value += strlen(key);
+	while(*value == ' ' || *value == '=')
+		++value;
+
+	int bytesWritten = 0;
+	while(*value != '\n' && *value != '\r' && *value != '\0' && bytesWritten < MAX_CLASS_NAME-1)
+	{
+		valueStr[bytesWritten++] = *(value++);
+	}
+//	printf("setting: %s \nvalue: %s\n", key, valueStr);
+
+	if(strlen(valueStr) ==0)
+	{
+		char format[] = "No value found for config key: %s";
+		char message[strlen(format) + strlen(key)];
+		sprintf(message, format, key);
+		AlertErrorAndExit(message);
+	}
+	return 1;
+}
+
+void AlertErrorAndExit(char* errorMsg)
+{
+	char format[] = "%s\nConfig path: %s";
+	int size = strlen(errorMsg) + strlen(format) + MAX_PATH;
+	char message[size];
+	sprintf(message, format, errorMsg, CONFIG_FILE_PATH);
+	MessageBox(0, message, "ATKMediaInterceptor", MB_ICONERROR);
+	exit(0);
 }
